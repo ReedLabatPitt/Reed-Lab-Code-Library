@@ -1,0 +1,159 @@
+%Temperature Forecast (ARIMA)
+%load data
+clear;
+load('O208508baseline.mat'); %This is the baseline data.
+ 
+BaseLine = A056baselinetelemetry.O208508;
+load('O208508temp.mat'); %This is the challenge data
+RealTemp = A056challengetelemetry.O208508;
+BaseLength = length(BaseLine);% length of vector of baseline values (number of points)
+ 
+%Estimate ARIMA Model
+TempMdl = arima('Constant',0,'D',0,'Seasonality',96,'MALags',10,'SMALags',96);
+        
+EstTempMdl = estimate(TempMdl,BaseLine); % Generation of predictive model from baseline data with specified parameters.
+[yF,yMSE] = forecast(EstTempMdl,2573,'Y0',BaseLine); % Generates points of forecasted data.
+avtemp = mean(BaseLine); % Average temperature, for reference.
+sttemp = std(BaseLine); % Standard deviation of baseline temp, for reference.
+ 
+[E,V,logL] = infer(EstTempMdl, BaseLine);
+% Calculates goodness-of-fit statistics.  
+ 
+%Calculate Residuals
+Residual = zeros(length(yF),1);close all  
+% This is an empty vector that will eventually hold the values of the residuals.
+ 
+for i=1:length(yF)                       
+    Residual(i) = RealTemp(i)-yF(i);
+    % This for-loop populates the Residual vector with residual values.
+end
+ 
+Rmax = max(Residual);
+ResidualSq = zeros(BaseLength,1);close all
+ 
+for i=1:BaseLength
+    ResidualSq(i) = Residual(i)^2;
+    % calculates squared value for residuals in the baseline period
+end
+ 
+ResidualSumSq = sum(ResidualSq(1:BaseLength));
+% calculates residual sum of squares
+ResidualSumSqVal = ResidualSumSq/(BaseLength-1);
+ 
+ResidualUpper = zeros(length(yF),1);
+for i = 1:length(ResidualUpper)                  
+    ResidualUpper(i,1) = 3*sqrt(ResidualSumSqVal); 
+    % This for-loop generates an upper bound line for residuals.
+end
+ 
+ResidualLower = zeros(length(yF),1);
+for i = 1:length(ResidualLower)
+    ResidualLower(i,1) = -1* ResidualUpper(i,1);
+    % this for loop creates the lower bound line for residuals
+end
+ 
+% calculate time
+TimePre = zeros(BaseLength,1);
+StartTime = -1*(BaseLength/96);
+for i = 1:BaseLength
+    TimePre(i,1) = StartTime + (i/96);
+end
+ 
+TotalLength = length(yF);
+PostLength = TotalLength - BaseLength;
+TimePost = zeros(PostLength,1);
+for i = 1:PostLength
+    TimePost(i,1) = i/96;
+end
+TimeTotal = vertcat(TimePre,TimePost);
+ 
+% Calculate 6 hour residual medians
+MedianLength = round(TotalLength/24);
+SixhrTempMedian = zeros(MedianLength,1);
+SixhrMax = zeros(MedianLength,1);
+TimeMedian = zeros(MedianLength,1);
+A = 1; % use this to count
+for i = 1:MedianLength
+    B = A+23;
+    SixhrTempMedian(i,1) = median(Residual(A:B));
+    SixhrMax(i,1) = max(Residual(A:B));
+    TimeMedian(i,1) = TimeTotal(A,1);
+    A = A+24;
+end
+ 
+DailyFeverLength = round(TotalLength/96);
+DailyFeverHours = zeros(DailyFeverLength,1);
+DailyFeverDuration = zeros(DailyFeverLength,1);
+TimeDays = zeros(DailyFeverLength,1);
+A = 1;
+for i = 1:DailyFeverLength
+    DailyFeverSum = 0; % initialize to 0
+    DailyFeverPoints = 0; % initialize to 0
+    B = A+95;
+    for z = A:B
+        if Residual(z,1)> ResidualUpper(z,1);
+            DailyFeverSum = DailyFeverSum + Residual(z,1);
+            DailyFeverPoints = DailyFeverPoints + 1;
+        end
+        DailyFeverHours(i,1) = DailyFeverSum/4;
+        DailyFeverDuration(i,1) = DailyFeverPoints/4;
+    end
+    TimeDays(i,1) = TimeTotal(A,1);
+    A = A+95;
+End
+
+FeverSum = 0;
+FeverPoints = 0;
+for i = BaseLength:TotalLength
+    if Residual(i,1) > ResidualUpper(i,1);
+        FeverSum = FeverSum + Residual(i,1);
+        FeverPoints = FeverPoints + 1;
+    end
+end
+ 
+FeverHours = FeverSum/4;
+FeverDuration = FeverPoints/4;
+ 
+figure;                                  
+plot(TimeTotal,Residual,'b','LineWidth',2);  % This plots the residuals.
+ylim([-6 6]);
+hold on;
+h1 = plot(TimeTotal,ResidualUpper,'k--','LineWidth',1);
+plot(TimeTotal,ResidualLower,'k--','LineWidth',1);
+hold off;
+
+%Plot predicted time series over actual data.
+figure;
+plot(TimeTotal,RealTemp,'r');
+hold on;
+h1 = plot(TimeTotal,yF,'b');
+title('O208508 Temperature ARIMA Forecast and 99% Forecast Interval');
+legend(h1,'Forecast','Location','NorthWest');
+hold off;
+ 
+%Plot six hour median residuals
+figure;
+plot(TimeMedian,SixhrTempMedian,'g','LineWidth',2);
+ylim([-6 6]);
+hold on;
+h1 = plot(TimeTotal,ResidualUpper,'k--','LineWidth',1);
+plot(TimeTotal,ResidualLower,'k--','LineWidth',1);
+hold off;
+ 
+T = table(TimeTotal, yF, yMSE, RealTemp, Residual, ResidualUpper, ResidualLower);
+filename = 'O208058c.xlsx';
+writetable(T,filename)
+RSS = {'Residual Sum of Squares'; ResidualSumSq}
+xlswrite(filename, RSS, 1, 'H2')
+DegF = {'Degrees of Freedom'; BaseLength}
+xlswrite(filename, DegF, 1, 'H4')
+FevH = {'Fever-Hours'; FeverHours}
+xlswrite(filename,FevH,1,'H6')
+FevDur = {'Fever Duration'; FeverDuration}
+xlswrite(filename,FevDur,1,'H8')
+ResMax = {'Residual Max'; Rmax}
+xlswrite(filename,ResMax,1,'H10')
+ST = table(TimeMedian, SixhrTempMedian, SixhrMax);
+writetable(ST, filename, 'Sheet', 2)
+RT = table(TimeDays, DailyFeverHours, DailyFeverDuration);
+writetable(RT, filename, 'Sheet', 3)
