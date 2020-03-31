@@ -1,4 +1,4 @@
-function [ output_args ] = prep_amy_raw15( args )
+function [ output_args ] = prep_TEICHERT_raw15( args )
 %%
 % ultimate goal: create a set sampled at 1/15 minutes that includes:
 %     delta, theta, alpha, beta and gamma power
